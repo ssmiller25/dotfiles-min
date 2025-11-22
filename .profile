@@ -2,6 +2,9 @@
 # Each variable should contain a base64 encoded gzipped tarball
 # Files will be extracted into $HOME directory
 
+# Save current directory to restore at the end
+ORIGINAL_DIR="$PWD"
+
 PROFILE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 MANIFEST_FILE="${PROFILE_DIR}/.homearchive-manifest"
 
@@ -86,3 +89,6 @@ for var_name in $homearchive_vars; do
         rm -rf "$temp_extract"
     fi
 done
+
+# Restore original directory
+cd "$ORIGINAL_DIR" || true
