@@ -6,7 +6,10 @@
 	"image": "mcr.microsoft.com/devcontainers/base:bullseye",
 	"features": {
 		"ghcr.io/lukewiwa/features/shellcheck:0": {}
-	}
+	},
+
+	// Automatically source .bashrc/.zshrc on shell startup
+	"postCreateCommand": "echo 'source /workspaces/$(basename \"$PWD\")/.bashrc' >> ~/.bashrc && echo 'source /workspaces/$(basename \"$PWD\")/.zshrc' >> ~/.zshrc",
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},

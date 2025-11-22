@@ -11,16 +11,22 @@ A minimal dotfile configuration that automatically extracts archived home direct
 
 ## Setup
 
-### 1. Source the profile in your shell
+### GitHub Codespaces / Devcontainers
+
+This repository is automatically configured for GitHub Codespaces and devcontainer environments! The `.devcontainer/devcontainer.json` configuration will automatically source `.bashrc` or `.zshrc` on startup (depending on your shell), which in turn sources `.profile` to extract your HOMEARCHIVE* variables.
+
+Just set your `HOMEARCHIVE*` variables as Codespace secrets or repository variables, and they'll be extracted automatically when your environment starts. Works with both bash and zsh.
+
+### Manual Setup (Other Environments)
 
 **For Bash** - Add to `~/.bashrc` or `~/.bash_profile`:
 ```bash
-source /path/to/dotfiles-min/.profile
+source /path/to/dotfiles-min/.bashrc
 ```
 
 **For Zsh** - Add to `~/.zshrc`:
 ```zsh
-source /path/to/dotfiles-min/.profile
+source /path/to/dotfiles-min/.zshrc
 ```
 
 ### 2. Create and encode your archives
