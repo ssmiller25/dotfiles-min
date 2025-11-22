@@ -1,0 +1,8 @@
+# HOMEARCHIVE Manifest
+# Format: ARCHIVE_NAME:file1:file2:file3
+# Lines starting with # are comments
+# File paths are relative to $HOME
+
+# Example:
+# HOMEARCHIVE:.ssh/id_rsa:.ssh/config:.ssh/known_hosts
+# HOMEARCHIVE_AWS:.aws/credentials:.aws/config
