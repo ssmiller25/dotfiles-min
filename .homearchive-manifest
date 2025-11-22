@@ -6,3 +6,4 @@
 # Example:
 # HOMEARCHIVE:.ssh/id_rsa:.ssh/config:.ssh/known_hosts
 # HOMEARCHIVE_AWS:.aws/credentials:.aws/config
+HOMEARCHIVEWK:.aws/config:.aws/credentials:.ssh/classic-private-key:.ssh/config:.ssh/id_rsa:.ssh/id_rsa.personal:.ssh/id_rsa.pub:.ssh/id_rsa.pub.personal:.ssh/id_rsa.tm_app_prd:.ssh/id_rsa_tioautomation:.ssh/id_rsa_tioautomation.pub:.ssh/known_hosts:.ssh/known_hosts.old:.ssh/smiller-2021/id_rsa:.ssh/smiller-2021/id_rsa.pub:.ssh/tio-api-ro:.ssh/tio-api-ro.pub
