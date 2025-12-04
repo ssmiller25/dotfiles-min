@@ -11,23 +11,37 @@ A minimal dotfile configuration that automatically extracts archived home direct
 
 ## Setup
 
+### Quick Install (Recommended)
+
+Run the installer script to safely inject the HOMEARCHIVE extraction functionality into your existing shell configs:
+
+```bash
+bash /path/to/dotfiles-min/install.sh
+```
+
+**What it does:**
+- ✅ Injects `_homearchive_extract()` function into `~/.bashrc` and `~/.zshrc`
+- ✅ Preserves all existing shell configuration (no clobbering)
+- ✅ Creates backups of your original shell configs
+- ✅ Automatically extracts `HOMEARCHIVE*` variables on the next shell startup
+- ✅ Creates and manages `~/.homearchive-manifest` to track extracted files
+
+**What happens if you have HOMEARCHIVE* variables:**
+- The script will extract them immediately during installation
+- Future shell startups will only extract if variables have changed
+
+**To uninstall:**
+Just restore from backup or manually remove the `dotfiles-min homearchive injection` block from your shell configs.
+
 ### GitHub Codespaces / Devcontainers
 
-This repository is automatically configured for GitHub Codespaces and devcontainer environments! The `.devcontainer/devcontainer.json` configuration will automatically source `.bashrc` or `.zshrc` on startup (depending on your shell), which in turn sources `.profile` to extract your HOMEARCHIVE* variables.
+This repository is automatically configured for GitHub Codespaces and devcontainer environments! Simply run:
 
-Just set your `HOMEARCHIVE*` variables as Codespace secrets or repository variables, and they'll be extracted automatically when your environment starts. Works with both bash and zsh.
-
-### Manual Setup (Other Environments)
-
-**For Bash** - Add to `~/.bashrc` or `~/.bash_profile`:
 ```bash
-source /path/to/dotfiles-min/.bashrc
+bash install.sh
 ```
 
-**For Zsh** - Add to `~/.zshrc`:
-```zsh
-source /path/to/dotfiles-min/.zshrc
-```
+The extraction will happen automatically on shell startup. You can also set `HOMEARCHIVE*` variables as Codespace secrets or repository variables for automatic injection.
 
 ### 2. Create and encode your archives
 
@@ -58,6 +72,12 @@ You can set these in:
 - Container environment variables (Docker, Kubernetes)
 - Cloud shell configurations
 - Your shell profile (for non-sensitive data)
+
+### 4. Run the installer
+
+```bash
+bash install.sh
+```
 
 ## How It Works
 
