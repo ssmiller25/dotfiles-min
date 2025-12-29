@@ -180,10 +180,12 @@ main() {
     # Copy ham utility to ~/.local/bin
     if [ -f "$SCRIPT_DIR/ham" ]; then
         mkdir -p "$HOME/.local/bin"
-        cp "$SCRIPT_DIR/ham" "$HOME/.local/bin/ham"
-        chmod +x "$HOME/.local/bin/ham"
-        log_info "Copied ham utility to ~/.local/bin/ham"
-        ham_installed=true
+        if cp "$SCRIPT_DIR/ham" "$HOME/.local/bin/ham" && chmod +x "$HOME/.local/bin/ham"; then
+            log_info "Copied ham utility to ~/.local/bin/ham"
+            ham_installed=true
+        else
+            log_error "Failed to copy ham utility to ~/.local/bin/ham"
+        fi
     else
         log_warn "ham utility not found at $SCRIPT_DIR/ham - skipping"
     fi
@@ -200,9 +202,12 @@ main() {
                 return 1
             fi
         fi
-        cp "$SCRIPT_DIR/README.md" "$HOME/README.md"
-        log_info "Copied README.md to $HOME/README.md"
-        readme_installed=true
+        if cp "$SCRIPT_DIR/README.md" "$HOME/README.md"; then
+            log_info "Copied README.md to $HOME/README.md"
+            readme_installed=true
+        else
+            log_error "Failed to copy README.md to $HOME/README.md"
+        fi
     else
         log_warn "README.md not found at $SCRIPT_DIR/README.md - skipping"
     fi
