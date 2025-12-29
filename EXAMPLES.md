@@ -315,26 +315,24 @@ Set different `SECRET_PROFILE` in each environment.
 
 ---
 
-## Example 7: Dry Run Before Pushing
+## Example 7: Verifying Files Before Pushing
 
-Test what would be uploaded without actually uploading:
+Verify which files will be uploaded:
 
 ```bash
-# Dry run
-secrets-sync push --profile work --dry-run
+# Show what's in the profile
+secrets-sync show work
 
 # Output:
-# ℹ Creating archive work...
-# ℹ Including 5 file(s):
-#   - .ssh/config
-#   - .ssh/id_rsa
-#   - .ssh/id_rsa.pub
-#   - .aws/credentials
-#   - .kube/config
-# ✓ Archive created: /tmp/homearchive.XXX.tar.gz
-# ℹ Dry run mode - archive created but not uploaded
-# ℹ Archive size: 4.2K
-# ℹ Would update GitHub variable: work (target: s3)
+# ℹ Profile: work
+#   • .ssh/config
+#   • .ssh/id_rsa
+#   • .ssh/id_rsa.pub
+#   • .aws/credentials
+#   • .kube/config
+
+# Then push with confidence
+secrets-sync push --profile work
 ```
 
 ---
@@ -422,6 +420,6 @@ gsutil ls gs://your-bucket/
 5. **Use private repos** for GitHub releases backend
 6. **Set up IAM roles** instead of access keys when possible
 7. **Document your setup** for team members
-8. **Use dry-run** before pushing to verify changes
+8. **Verify with show command** before pushing to verify changes
 9. **Keep sensitive files encrypted** with GPG for extra security
 10. **Regular backups** - secrets-sync doesn't replace proper backup strategy

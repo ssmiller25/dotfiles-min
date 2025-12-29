@@ -41,9 +41,6 @@ secrets-sync pull
 
 # Pull from specific profile
 secrets-sync pull --profile personal
-
-# Dry run (preview without uploading)
-secrets-sync push --dry-run
 ```
 
 ## Viewing Information
@@ -269,7 +266,7 @@ secrets-sync version
 ## Quick Tips
 
 - 💡 Start with GitHub releases if unsure (it's free!)
-- 💡 Use `--dry-run` to preview changes
+- 💡 Use `secrets-sync show` to verify what's in a profile
 - 💡 Enable S3 versioning for backup
 - 💡 Use separate profiles for work/personal
 - 💡 Test in a fresh Codespace before committing

@@ -213,7 +213,7 @@ _secrets_sync_auto() {
 }
 
 # Only run secrets-sync once per session
-if [ -z "${SECRETS_SYNC_RAN:-}" ] && [ -z "${HOMEARCHIVE_EXTRACTED:-}" ]; then
+if [ -z "${SECRETS_SYNC_RAN:-}" ]; then
     _secrets_sync_auto
     SECRETS_SYNC_RAN=1
 fi

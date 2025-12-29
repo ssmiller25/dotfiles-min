@@ -167,8 +167,9 @@ secrets-sync show [--profile work]
 # Switch active profile
 secrets-sync switch personal
 
-# Encrypt secrets before upload (optional)
-secrets-sync push --encrypt --key-env SECRET_ENCRYPTION_KEY
+# For encryption, encrypt files with GPG before adding:
+# gpg --encrypt --recipient your@email.com ~/.ssh/id_rsa
+# secrets-sync add ~/.ssh/id_rsa.gpg work
 ```
 
 #### 2. Updated Shell Integration
