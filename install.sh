@@ -173,6 +173,24 @@ main() {
     
     log_info "Home directory: $HOME"
     
+    # Copy ham utility to ~/.local/bin
+    if [ -f "$SCRIPT_DIR/ham" ]; then
+        mkdir -p "$HOME/.local/bin"
+        cp "$SCRIPT_DIR/ham" "$HOME/.local/bin/ham"
+        chmod +x "$HOME/.local/bin/ham"
+        log_info "Copied ham utility to ~/.local/bin/ham"
+    else
+        log_warn "ham utility not found at $SCRIPT_DIR/ham - skipping"
+    fi
+    
+    # Copy README.md to home directory
+    if [ -f "$SCRIPT_DIR/README.md" ]; then
+        cp "$SCRIPT_DIR/README.md" "$HOME/README.md"
+        log_info "Copied README.md to $HOME/README.md"
+    else
+        log_warn "README.md not found at $SCRIPT_DIR/README.md - skipping"
+    fi
+    
     # Inject into bash
     inject_into_shell_config "$HOME/.bashrc" "Bash"
     
@@ -206,10 +224,16 @@ main() {
     log_info "  • Added _homearchive_extract() function to ~/.bashrc"
     log_info "  • Added _homearchive_extract() function to ~/.zshrc"
     log_info "  • Created ~/.homearchive-manifest (will be auto-populated)"
+    log_info "  • Copied ham utility to ~/.local/bin/ham"
+    log_info "  • Copied README.md to ~/README.md"
+    log_info ""
+    log_info "To use ham from anywhere, ensure ~/.local/bin is in your PATH:"
+    log_info "  export PATH=\"\$HOME/.local/bin:\$PATH\""
     log_info ""
     log_info "To remove:"
     log_info "  1. Restore from backup: cp ~/.bashrc.backup.* ~/.bashrc"
     log_info "  2. Or manually delete the 'dotfiles-min homearchive injection' block"
+    log_info "  3. Remove installed files: rm ~/.local/bin/ham ~/README.md"
     log_info ""
     log_info "Your original shell configs were backed up:"
     ls -la "$HOME"/.bashrc.backup.* "$HOME"/.zshrc.backup.* 2>/dev/null || log_info "  (no backups found yet)"
