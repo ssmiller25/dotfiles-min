@@ -173,12 +173,17 @@ main() {
     
     log_info "Home directory: $HOME"
     
+    # Track what was installed
+    local ham_installed=false
+    local readme_installed=false
+    
     # Copy ham utility to ~/.local/bin
     if [ -f "$SCRIPT_DIR/ham" ]; then
         mkdir -p "$HOME/.local/bin"
         cp "$SCRIPT_DIR/ham" "$HOME/.local/bin/ham"
         chmod +x "$HOME/.local/bin/ham"
         log_info "Copied ham utility to ~/.local/bin/ham"
+        ham_installed=true
     else
         log_warn "ham utility not found at $SCRIPT_DIR/ham - skipping"
     fi
@@ -193,6 +198,7 @@ main() {
         fi
         cp "$SCRIPT_DIR/README.md" "$HOME/README.md"
         log_info "Copied README.md to $HOME/README.md"
+        readme_installed=true
     else
         log_warn "README.md not found at $SCRIPT_DIR/README.md - skipping"
     fi
@@ -230,18 +236,28 @@ main() {
     log_info "  • Added _homearchive_extract() function to ~/.bashrc"
     log_info "  • Added _homearchive_extract() function to ~/.zshrc"
     log_info "  • Created ~/.homearchive-manifest (will be auto-populated)"
-    log_info "  • Copied ham utility to ~/.local/bin/ham"
-    log_info "  • Copied README.md to ~/README.md"
+    if [ "$ham_installed" = true ]; then
+        log_info "  • Copied ham utility to ~/.local/bin/ham"
+    fi
+    if [ "$readme_installed" = true ]; then
+        log_info "  • Copied README.md to ~/README.md"
+    fi
     log_info ""
-    log_info "To use ham from anywhere, ensure ~/.local/bin is in your PATH:"
-    log_info "  export PATH=\"\$HOME/.local/bin:\$PATH\""
-    log_info ""
+    if [ "$ham_installed" = true ]; then
+        log_info "To use ham from anywhere, ensure ~/.local/bin is in your PATH:"
+        log_info "  export PATH='\$HOME/.local/bin:\$PATH'"
+        log_info ""
+    fi
     log_info "To remove:"
     log_info "  1. Restore from backup: cp ~/.bashrc.backup.* ~/.bashrc"
     log_info "  2. Or manually delete the 'dotfiles-min homearchive injection' block"
-    log_info "  3. Remove installed files: rm -f ~/.local/bin/ham"
-    log_info "  4. For README.md, restore from backup if it existed: cp ~/README.md.backup.* ~/README.md"
-    log_info "     Or remove if you didn't have one: rm -f ~/README.md"
+    if [ "$ham_installed" = true ]; then
+        log_info "  3. Remove ham utility: rm -f ~/.local/bin/ham"
+    fi
+    if [ "$readme_installed" = true ]; then
+        log_info "  4. For README.md, restore from backup (if one was created) or remove: rm -f ~/README.md"
+        log_info "     Check for backups with: ls -la ~/README.md.backup.*"
+    fi
     log_info ""
     log_info "Your original shell configs were backed up:"
     ls -la "$HOME"/.bashrc.backup.* "$HOME"/.zshrc.backup.* 2>/dev/null || log_info "  (no backups found yet)"
