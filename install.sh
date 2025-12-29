@@ -193,7 +193,7 @@ main() {
     # Copy README.md to home directory
     if [ -f "$SCRIPT_DIR/README.md" ]; then
         if [ -f "$HOME/README.md" ]; then
-            local readme_backup="$HOME/README.md.backup.$(date +%s)"
+            local readme_backup="$HOME/README.md.backup.$(date +%Y%m%d_%H%M%S)"
             if cp "$HOME/README.md" "$readme_backup"; then
                 log_warn "README.md already exists in home directory - will be overwritten"
                 log_info "Backed up existing README.md to $readme_backup"
@@ -258,14 +258,14 @@ main() {
         log_info ""
     fi
     log_info "To remove:"
-    log_info "  1. Restore from backup: cp ~/.bashrc.backup.* ~/.bashrc"
-    log_info "  2. Or manually delete the 'dotfiles-min homearchive injection' block"
+    log_info "  • Restore from backup: cp ~/.bashrc.backup.* ~/.bashrc"
+    log_info "  • Or manually delete the 'dotfiles-min homearchive injection' block"
     if [ "$ham_installed" = true ]; then
-        log_info "  3. Remove ham utility: rm -f ~/.local/bin/ham"
+        log_info "  • Remove ham utility: rm -f ~/.local/bin/ham"
     fi
     if [ "$readme_installed" = true ]; then
-        log_info "  4. For README.md, restore from backup (if one was created) or remove: rm -f ~/README.md"
-        log_info "     Check for backups with: ls -la ~/README.md.backup.*"
+        log_info "  • For README.md, restore from backup (if one was created) or remove: rm -f ~/README.md"
+        log_info "    Check for backups with: ls -la ~/README.md.backup.*"
     fi
     log_info ""
     log_info "Your original shell configs were backed up:"
