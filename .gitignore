@@ -1,0 +1,24 @@
+# Environment files with secrets
+.devcontainer/.env
+
+# Secrets sync state
+.secrets-sync-state
+
+# Backup files
+*.backup.*
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

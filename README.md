@@ -1,10 +1,58 @@
 # dotfiles-min
 
-A minimal dotfile configuration that automatically extracts archived home directory files from environment variables.
+A minimal dotfile configuration with two secret management approaches:
+
+1. **🆕 Cloud-based secrets** (Recommended) - Store secrets in S3, GitHub releases, Azure, or GCS with profile support
+2. **Legacy HOMEARCHIVE** - Store base64-encoded archives in environment variables
+
+## 🆕 New: Cloud-Based Secrets Management
+
+The new `secrets-sync` tool provides a better way to manage secrets:
+
+✅ **Store secrets in cloud storage** (S3, GitHub releases, Azure, GCS)  
+✅ **Use environment variables only for authentication** (not file content)  
+✅ **Multiple profiles** (work, personal, project-specific)  
+✅ **Easy updates** (change individual files without rebuilding archives)  
+✅ **Version control** (cloud storage versioning)  
+✅ **Works in Codespaces & Devcontainers**
+
+### Quick Start with Cloud Secrets
+
+```bash
+# 1. Install
+git clone https://github.com/ssmiller25/dotfiles-min.git
+cd dotfiles-min
+bash install.sh
+
+# 2. Initialize and configure
+secrets-sync init
+vim ~/.secrets-profiles.yaml
+
+# 3. Add files and push to cloud
+secrets-sync add ~/.ssh/config work
+secrets-sync push --profile work
+
+# 4. Set environment variables (authentication only!)
+export SECRET_STORE=s3
+export SECRET_PROFILE=work
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
+```
+
+**📖 See [SECRETS_SETUP_GUIDE.md](SECRETS_SETUP_GUIDE.md) for detailed setup instructions**  
+**📋 See [SECRETS_MANAGEMENT_PROPOSAL.md](SECRETS_MANAGEMENT_PROPOSAL.md) for architecture and design**
+
+---
+
+## Legacy: HOMEARCHIVE System
+
+The original system stores base64-encoded tarballs in environment variables. Still supported but not recommended for new setups.
 
 ## Features
 
-- Automatically extracts gzipped tarballs from any `HOMEARCHIVE*` environment variables
+- **Cloud-based secrets**: Store secrets in S3, GitHub releases, Azure Blob, or Google Cloud Storage
+- **Profile system**: Switch between different secret sets (work, personal, project-specific)
+- **Legacy support**: Automatically extracts gzipped tarballs from any `HOMEARCHIVE*` environment variables
 - Compatible with both **bash** and **zsh**
 - Supports multiple archive variables (e.g., `HOMEARCHIVE`, `HOMEARCHIVEWK`, `HOMEARCHIVE_SSH`, etc.)
 - Files are extracted directly into your `$HOME` directory
@@ -13,35 +61,57 @@ A minimal dotfile configuration that automatically extracts archived home direct
 
 ### Quick Install (Recommended)
 
-Run the installer script to safely inject the HOMEARCHIVE extraction functionality into your existing shell configs:
+Run the installer script to install both cloud-based secrets management and legacy HOMEARCHIVE support:
 
 ```bash
 bash /path/to/dotfiles-min/install.sh
 ```
 
 **What it does:**
+- ✅ Installs `secrets-sync` utility to `~/bin/secrets-sync` (for cloud-based secrets)
+- ✅ Installs `ham` utility to `~/bin/ham` (Home Archive Manager)
+- ✅ Injects secrets-sync integration into `~/.bashrc` and `~/.zshrc`
 - ✅ Injects `_homearchive_extract()` function into `~/.bashrc` and `~/.zshrc`
 - ✅ Preserves all existing shell configuration (no clobbering)
 - ✅ Creates backups of your original shell configs
-- ✅ Automatically extracts `HOMEARCHIVE*` variables on the next shell startup
+- ✅ Automatically syncs secrets on shell startup (if configured)
 - ✅ Creates and manages `~/.homearchive-manifest` to track extracted files
 
-**What happens if you have HOMEARCHIVE* variables:**
-- The script will extract them immediately during installation
-- Future shell startups will only extract if variables have changed
+**Priority order:**
+1. If `SECRET_STORE` and `SECRET_PROFILE` are set → uses cloud-based secrets
+2. If `HOMEARCHIVE*` variables exist → uses legacy HOMEARCHIVE system
+3. Otherwise → waits for configuration
 
 **To uninstall:**
-Just restore from backup or manually remove the `dotfiles-min homearchive injection` block from your shell configs.
+Just restore from backup or manually remove the `dotfiles-min` injection blocks from your shell configs.
 
 ### GitHub Codespaces / Devcontainers
 
-This repository is automatically configured for GitHub Codespaces and devcontainer environments! Simply run:
+This repository is automatically configured for GitHub Codespaces and devcontainer environments!
 
-```bash
-bash install.sh
-```
+#### Using Cloud-Based Secrets (Recommended)
 
-The extraction will happen automatically on shell startup. You can also set `HOMEARCHIVE*` variables as Codespace secrets or repository variables for automatic injection.
+**For Codespaces:**
+1. Go to repository Settings → Secrets and variables → Codespaces
+2. Add secrets:
+   ```
+   SECRET_STORE=s3
+   SECRET_PROFILE=work
+   AWS_ACCESS_KEY_ID=...
+   AWS_SECRET_ACCESS_KEY=...
+   ```
+3. Open Codespace - secrets sync automatically!
+
+**For Local Devcontainers:**
+1. Copy `.devcontainer/.env.example` to `.devcontainer/.env`
+2. Fill in your credentials
+3. Build devcontainer - secrets sync automatically!
+
+#### Using Legacy HOMEARCHIVE
+
+Set `HOMEARCHIVE*` variables as Codespace secrets or in `.devcontainer/.env` and they'll be extracted automatically.
+
+**See [SECRETS_SETUP_GUIDE.md](SECRETS_SETUP_GUIDE.md) for detailed instructions.**
 
 ### 2. Create and encode your archives
 
@@ -207,7 +277,9 @@ vim ~/.ssh/config
 
 ### Installing `ham` in Your PATH
 
-For easy access from anywhere:
+The installer automatically copies `ham` to `~/bin/ham`, which is added to your PATH.
+
+For manual installation:
 
 ```bash
 # Option 1: Symlink to a directory in your PATH
@@ -217,7 +289,74 @@ ln -s /path/to/dotfiles-min/ham ~/.local/bin/ham
 echo 'export PATH="/path/to/dotfiles-min:$PATH"' >> ~/.bashrc
 ```
 
+## Cloud-Based Secrets with `secrets-sync` 🆕
+
+The new `secrets-sync` tool provides a modern alternative to HOMEARCHIVE for managing secrets.
+
+### Why Use secrets-sync?
+
+- ☁️ **Cloud storage**: Secrets stored in S3, GitHub releases, Azure, or GCS
+- 🔐 **Better security**: Only auth credentials in env vars, not file content
+- 📁 **Profiles**: Easy switching between work, personal, project-specific secrets
+- 🔄 **Easy updates**: Change individual files without rebuilding archives
+- 📊 **Versioning**: Cloud storage provides version history
+- 🚀 **Modern**: Built for cloud-native workflows
+
+### Quick Example
+
+```bash
+# Initialize
+secrets-sync init
+
+# Configure profile (edit ~/.secrets-profiles.yaml)
+# Add your S3 bucket, GitHub repo, etc.
+
+# Add files
+secrets-sync add ~/.ssh/config work
+secrets-sync add ~/.aws/credentials work
+
+# Push to cloud
+secrets-sync push --profile work
+
+# In a new environment (Codespace/devcontainer)
+# Set: SECRET_STORE=s3, SECRET_PROFILE=work, AWS credentials
+# Secrets sync automatically!
+```
+
+### Available Commands
+
+- **`secrets-sync init`** - Initialize configuration
+- **`secrets-sync add-profile [name]`** - Add a new profile interactively
+- **`secrets-sync add <file> [profile]`** - Add a file to a profile
+- **`secrets-sync push [--profile]`** - Upload secrets to cloud
+- **`secrets-sync pull [--profile]`** - Download secrets from cloud
+- **`secrets-sync list-profiles`** - List all profiles
+- **`secrets-sync show [profile]`** - Show files in a profile
+- **`secrets-sync switch <profile>`** - Switch active profile
+- **`secrets-sync migrate <env> <profile>`** - Migrate from HOMEARCHIVE
+
+### Supported Storage Backends
+
+- **AWS S3** - Most common (free tier: 5GB)
+- **GitHub Releases** - Completely free
+- **Azure Blob Storage** - For Azure environments
+- **Google Cloud Storage** - For GCP environments
+
+**📖 Full documentation: [SECRETS_SETUP_GUIDE.md](SECRETS_SETUP_GUIDE.md)**
+
 ## Security Notes
+
+### For Cloud-Based Secrets (secrets-sync)
+
+- ✅ **Use IAM roles** when possible instead of access keys
+- ✅ **Enable S3 versioning** for history and recovery
+- ✅ **Use private GitHub repos** for GitHub releases backend
+- ✅ **Separate profiles** for different trust levels
+- ✅ **Encrypt sensitive files** with GPG before uploading (optional)
+- ✅ **Set up bucket policies** to restrict access
+- ⚠️ Only auth credentials in environment variables, not file content
+
+### For Legacy HOMEARCHIVE
 
 - Never commit actual archive contents to version control
 - Use CI/CD secret management for sensitive data

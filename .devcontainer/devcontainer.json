@@ -1,5 +1,3 @@
-// For format details, see https://aka.ms/devcontainer.json. For config options, see the
-// README at: https://github.com/devcontainers/templates/tree/main/src/debian
 {
 	"name": "Debian",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
@@ -8,8 +6,12 @@
 		"ghcr.io/lukewiwa/features/shellcheck:0": {}
 	},
 
-	// Automatically source .bashrc/.zshrc on shell startup
-	"postCreateCommand": "echo 'source /workspaces/$(basename \"$PWD\")/.bashrc' >> ~/.bashrc && echo 'source /workspaces/$(basename \"$PWD\")/.zshrc' >> ~/.zshrc",
+	// Load environment variables from .env file (for local devcontainers)
+	// In Codespaces, use repository secrets instead
+	"runArgs": ["--env-file", ".devcontainer/.env"],
+
+	// Automatically install dotfiles-min on container creation
+	"postCreateCommand": "bash install.sh",
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
