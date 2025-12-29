@@ -185,6 +185,11 @@ main() {
     
     # Copy README.md to home directory
     if [ -f "$SCRIPT_DIR/README.md" ]; then
+        if [ -f "$HOME/README.md" ]; then
+            log_warn "README.md already exists in home directory - will be overwritten"
+            cp "$HOME/README.md" "$HOME/README.md.backup.$(date +%s)"
+            log_info "Backed up existing README.md to ~/README.md.backup.*"
+        fi
         cp "$SCRIPT_DIR/README.md" "$HOME/README.md"
         log_info "Copied README.md to $HOME/README.md"
     else
@@ -233,7 +238,7 @@ main() {
     log_info "To remove:"
     log_info "  1. Restore from backup: cp ~/.bashrc.backup.* ~/.bashrc"
     log_info "  2. Or manually delete the 'dotfiles-min homearchive injection' block"
-    log_info "  3. Remove installed files: rm ~/.local/bin/ham ~/README.md"
+    log_info "  3. Remove installed files: rm -f ~/.local/bin/ham ~/README.md"
     log_info ""
     log_info "Your original shell configs were backed up:"
     ls -la "$HOME"/.bashrc.backup.* "$HOME"/.zshrc.backup.* 2>/dev/null || log_info "  (no backups found yet)"
