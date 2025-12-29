@@ -247,11 +247,11 @@ secrets-sync push --profile work
 unset HOMEARCHIVE
 ```
 
-### Dry Run (Preview Changes)
+### Preview What Will Be Uploaded
 
 ```bash
-# See what would be uploaded without actually uploading
-secrets-sync push --profile work --dry-run
+# View what files are in the profile before pushing
+secrets-sync show work
 ```
 
 ### Using Different Storage for Different Profiles
