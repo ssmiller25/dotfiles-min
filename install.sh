@@ -192,9 +192,13 @@ main() {
     if [ -f "$SCRIPT_DIR/README.md" ]; then
         if [ -f "$HOME/README.md" ]; then
             local readme_backup="$HOME/README.md.backup.$(date +%s)"
-            log_warn "README.md already exists in home directory - will be overwritten"
-            cp "$HOME/README.md" "$readme_backup"
-            log_info "Backed up existing README.md to $readme_backup"
+            if cp "$HOME/README.md" "$readme_backup"; then
+                log_warn "README.md already exists in home directory - will be overwritten"
+                log_info "Backed up existing README.md to $readme_backup"
+            else
+                log_error "Failed to backup existing README.md - skipping installation"
+                return 1
+            fi
         fi
         cp "$SCRIPT_DIR/README.md" "$HOME/README.md"
         log_info "Copied README.md to $HOME/README.md"
