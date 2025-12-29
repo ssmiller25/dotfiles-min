@@ -27,6 +27,32 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
+# Ensure HOME/bin is in PATH
+ensure_bin_in_path() {
+    local shell_config="$1"
+    local shell_name="$2"
+    
+    if [ ! -f "$shell_config" ]; then
+        return 0
+    fi
+    
+    # Check if PATH already includes $HOME/bin
+    if grep -q "export PATH.*\$HOME/bin" "$shell_config" 2>/dev/null; then
+        return 0
+    fi
+    
+    # Add PATH configuration at the end of the file
+    cat >> "$shell_config" << 'PATHEOF'
+
+# Ensure $HOME/bin is in PATH
+if [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
+    export PATH="$HOME/bin:$PATH"
+fi
+PATHEOF
+    
+    log_info "Ensured $HOME/bin is in PATH for $shell_name"
+}
+
 # Generate the homearchive extraction function
 generate_homearchive_function() {
     cat << 'FUNC_EOF'
@@ -177,14 +203,14 @@ main() {
     local ham_installed=false
     local readme_installed=false
     
-    # Copy ham utility to ~/.local/bin
+    # Copy ham utility to ~/bin
     if [ -f "$SCRIPT_DIR/ham" ]; then
-        mkdir -p "$HOME/.local/bin"
-        if cp "$SCRIPT_DIR/ham" "$HOME/.local/bin/ham" && chmod +x "$HOME/.local/bin/ham"; then
-            log_info "Copied ham utility to ~/.local/bin/ham"
+        mkdir -p "$HOME/bin"
+        if cp "$SCRIPT_DIR/ham" "$HOME/bin/ham" && chmod +x "$HOME/bin/ham"; then
+            log_info "Copied ham utility to ~/bin/ham"
             ham_installed=true
         else
-            log_error "Failed to copy ham utility to ~/.local/bin/ham"
+            log_error "Failed to copy ham utility to ~/bin/ham"
         fi
     else
         log_warn "ham utility not found at $SCRIPT_DIR/ham - skipping"
@@ -218,6 +244,10 @@ main() {
     # Inject into zsh
     inject_into_shell_config "$HOME/.zshrc" "Zsh"
     
+    # Ensure ~/bin is in PATH for both shells
+    ensure_bin_in_path "$HOME/.bashrc" "Bash"
+    ensure_bin_in_path "$HOME/.zshrc" "Zsh"
+    
     # Optional: run extraction immediately if HOMEARCHIVE* vars are present
     if env | grep -q "^HOMEARCHIVE"; then
         log_info "HOMEARCHIVE* variables detected - running extraction..."
@@ -245,23 +275,25 @@ main() {
     log_info "  • Added _homearchive_extract() function to ~/.bashrc"
     log_info "  • Added _homearchive_extract() function to ~/.zshrc"
     log_info "  • Created ~/.homearchive-manifest (will be auto-populated)"
+    log_info "  • Added \$HOME/bin to PATH in ~/.bashrc and ~/.zshrc"
     if [ "$ham_installed" = true ]; then
-        log_info "  • Copied ham utility to ~/.local/bin/ham"
+        log_info "  • Copied ham utility to ~/bin/ham"
     fi
     if [ "$readme_installed" = true ]; then
         log_info "  • Copied README.md to ~/README.md"
     fi
     log_info ""
     if [ "$ham_installed" = true ]; then
-        log_info "To use ham from anywhere, ensure ~/.local/bin is in your PATH:"
-        log_info "  export PATH='\$HOME/.local/bin:\$PATH'"
-        log_info ""
+        log_info "The ham utility has been installed to ~/bin/ham"
+        log_info "It will be available in your PATH after restarting your shell."
     fi
+    log_info ""
     log_info "To remove:"
     log_info "  • Restore from backup: cp ~/.bashrc.backup.* ~/.bashrc"
     log_info "  • Or manually delete the 'dotfiles-min homearchive injection' block"
+    log_info "  • Also remove the PATH configuration block if desired"
     if [ "$ham_installed" = true ]; then
-        log_info "  • Remove ham utility: rm -f ~/.local/bin/ham"
+        log_info "  • Remove ham utility: rm -f ~/bin/ham"
     fi
     if [ "$readme_installed" = true ]; then
         log_info "  • For README.md, restore from backup (if one was created) or remove: rm -f ~/README.md"
