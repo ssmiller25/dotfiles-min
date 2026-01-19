@@ -188,7 +188,15 @@ update_github_variable() {
             gh variable set "$archive_name" --body "$encoded_value" --env "$target_name"
             ;;
         codespace)
-            gh codespace env set "$archive_name" --value "$encoded_value"
+            # If Codespaces env update fails (permissions, repo restrictions, etc.),
+            # show the base64 payload so it can be saved manually.
+            if ! gh codespace env set "$archive_name" --value "$encoded_value"; then
+                warning "Unable to save Codespaces secret automatically. Save this value manually:"
+                echo "-----BEGIN HOMEARCHIVE ${archive_name}-----"
+                echo "$encoded_value"
+                echo "-----END HOMEARCHIVE ${archive_name}-----"
+                return 1
+            fi
             ;;
         *)
             error "Invalid target: $target (use: repo, env, or codespace)"
