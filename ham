@@ -3,38 +3,85 @@
 # ham (Home Archive Manager): Manage HOMEARCHIVE environment variables
 # Usage: ham [command] [options]
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANIFEST_FILE="${HOME}/.homearchive-manifest"
 
-# Colors for output
+# ---------------------------------------------------------------------------
+# Shell compatibility helpers
+# ---------------------------------------------------------------------------
+is_interactive() { [[ -t 0 ]] && [[ -t 1 ]]; return $?; }
+
+# Detect OS for platform-specific tools
+detect_os() {
+    case "$(uname -s)" in
+        Darwin)  echo "macos"  ;;
+        Linux)   echo "linux"  ;;
+        *)       echo "unknown" ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# Color output
+# ---------------------------------------------------------------------------
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Helper functions
-error() {
-    echo -e "${RED}Error: $1${NC}" >&2
+die() {
+    echo -e "${RED}Error: $*${NC}" >&2
     exit 1
 }
 
-info() {
-    echo -e "${BLUE}ℹ ${NC}$1"
+info()  { echo -e "${BLUE}ℹ ${NC}$1"; }
+ok()    { echo -e "${GREEN}✓${NC} $1"; }
+warn()  { echo -e "${YELLOW}⚠${NC} $1"; }
+
+# ---------------------------------------------------------------------------
+# Require a CLI tool (with an install hint)
+# ---------------------------------------------------------------------------
+require_cmd() {
+    local cmd="$1"
+    local hint="${2:-}"
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        die "'$cmd' is required but not found.${hint:+ $hint}"
+    fi
 }
 
-success() {
-    echo -e "${GREEN}✓${NC} $1"
+# ---------------------------------------------------------------------------
+# Manifest locking (mkdir is atomic on both macOS and Linux)
+# ---------------------------------------------------------------------------
+manifest_lock() {
+    local lock_dir="${MANIFEST_FILE}.lock"
+    local i=0
+    while ! mkdir "$lock_dir" 2>/dev/null; do
+        sleep 0.1
+        i=$((i + 1))
+        if [ "$i" -ge 50 ]; then
+            die "Could not acquire manifest lock after 5s"
+        fi
+    done
 }
 
-warning() {
-    echo -e "${YELLOW}⚠${NC} $1"
+manifest_unlock() {
+    rmdir "${MANIFEST_FILE}.lock" 2>/dev/null || true
 }
 
-# Initialize manifest file if it doesn't exist
+# ---------------------------------------------------------------------------
+# Safe sed – escape regex metacharacters in file paths
+# ---------------------------------------------------------------------------
+escape_sed() {
+    printf '%s' "$1" | sed 's/[.[\*^$()+?{|]/\\&/g'
+}
+
+# ---------------------------------------------------------------------------
+# Initialise manifest file if it doesn't exist
+# ---------------------------------------------------------------------------
 init_manifest() {
+    manifest_lock
     if [ ! -f "$MANIFEST_FILE" ]; then
         cat > "$MANIFEST_FILE" << 'EOF'
 # HOMEARCHIVE Manifest
@@ -46,74 +93,107 @@ init_manifest() {
 # HOMEARCHIVE:.ssh/id_rsa:.ssh/config:.ssh/known_hosts
 # HOMEARCHIVE_AWS:.aws/credentials:.aws/config
 EOF
-        success "Created manifest file: $MANIFEST_FILE"
+        ok "Created manifest file: $MANIFEST_FILE"
     fi
+    manifest_unlock
 }
 
-# Parse manifest and return archive name for a given file
+# ---------------------------------------------------------------------------
+# Find which archive contains a given file
+# ---------------------------------------------------------------------------
 find_archive_for_file() {
     local file="$1"
     local normalized_file="${file#$HOME/}"
     normalized_file="${normalized_file#./}"
-    
+
     if [ ! -f "$MANIFEST_FILE" ]; then
         return 1
     fi
-    
+
+    local archive_name files_list
     while IFS=':' read -r archive_name files_list || [ -n "$archive_name" ]; do
-        # Skip comments and empty lines
+        # Skip comments and blank lines
         [[ "$archive_name" =~ ^#.*$ ]] && continue
         [[ -z "$archive_name" ]] && continue
-        
+        # ... and lines that have no file list (trailing colon edge case)
+        [[ -z "$files_list" ]] && continue
+
         IFS=':' read -ra FILES <<< "$files_list"
         for f in "${FILES[@]}"; do
+            [[ -z "$f" ]] && continue
             if [ "$f" = "$normalized_file" ]; then
-                echo "$archive_name"
+                printf '%s' "$archive_name"
                 return 0
             fi
         done
     done < "$MANIFEST_FILE"
-    
+
     return 1
 }
 
-# Get all files for an archive from manifest
+# ---------------------------------------------------------------------------
+# Get all files for an archive from the manifest
+# ---------------------------------------------------------------------------
 get_archive_files() {
     local archive_name="$1"
-    
+
     if [ ! -f "$MANIFEST_FILE" ]; then
         return 1
     fi
-    
+
+    local name rest
     while IFS=':' read -r name rest || [ -n "$name" ]; do
         [[ "$name" =~ ^#.*$ ]] && continue
         [[ -z "$name" ]] && continue
-        
+
         if [ "$name" = "$archive_name" ]; then
-            echo "$rest" | tr ':' '\n'
+            printf '%s\n' "$rest" | tr ':' '\n' | grep -v '^$'
             return 0
         fi
     done < "$MANIFEST_FILE"
-    
+
     return 1
 }
 
-# Create archive from files
+# ---------------------------------------------------------------------------
+# Check archive size against GitHub's 48 KB secret limit
+# ---------------------------------------------------------------------------
+warn_if_large() {
+    local archive_file="$1"
+    local archive_name="$2"
+    local max_kb=48
+
+    if [ -f "$archive_file" ]; then
+        local size_kb
+        size_kb=$(du -k "$archive_file" | cut -f1)
+        if [ "$size_kb" -gt "$max_kb" ]; then
+            warn "$archive_name archive is ${size_kb}KB (GitHub secret limit is ${max_kb}KB) – upload may fail"
+            if is_interactive; then
+                read -r -p "Continue anyway? [y/N] " reply
+                [[ "$reply" =~ ^[Yy]$ ]] || die "Aborted."
+            else
+                warn "Non-interactive mode – continuing (upload may fail)"
+            fi
+        fi
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Create archive from files listed in the manifest
+# ---------------------------------------------------------------------------
 create_archive() {
     local archive_name="$1"
     local output_file="$2"
-    
+
     info "Creating archive $archive_name..."
-    
-    local files=$(get_archive_files "$archive_name")
+
+    local files
+    files=$(get_archive_files "$archive_name")
     if [ -z "$files" ]; then
-        error "No files found for archive $archive_name in manifest"
+        die "No files found for archive $archive_name in manifest"
     fi
-    
-    # Check which files exist
-    local existing_files=()
-    local missing_files=()
-    
+
+    local existing_files=() missing_files=()
     while IFS= read -r file; do
         [[ -z "$file" ]] && continue
         local full_path="$HOME/$file"
@@ -123,277 +203,309 @@ create_archive() {
             missing_files+=("$file")
         fi
     done <<< "$files"
-    
+
     if [ ${#missing_files[@]} -gt 0 ]; then
-        warning "Missing files (will be skipped):"
+        warn "Missing files (will be skipped):"
         printf '  - %s\n' "${missing_files[@]}"
     fi
-    
+
     if [ ${#existing_files[@]} -eq 0 ]; then
-        error "No files exist for archive $archive_name"
+        die "No files exist for archive $archive_name"
     fi
-    
+
     info "Including ${#existing_files[@]} file(s):"
     printf '  - %s\n' "${existing_files[@]}"
-    
+
     # Create archive
     cd "$HOME"
     printf '%s\n' "${existing_files[@]}" | tar -czf "$output_file" -T - 2>/dev/null
-    
-    success "Archive created: $output_file"
+
+    ok "Archive created: $output_file"
+    warn_if_large "$output_file" "$archive_name"
 }
 
-# Encode archive to base64
+# ---------------------------------------------------------------------------
+# Encode archive to base64 (OS-aware)
+# ---------------------------------------------------------------------------
 encode_archive() {
     local archive_file="$1"
-    
-    # Detect OS for base64 flags
-    if [[ "$OSTYPE" == "darwin"* ]]; then
+    local os
+    os=$(detect_os)
+    if [ "$os" = "macos" ]; then
         base64 -i "$archive_file" -o "${archive_file}.b64"
     else
         base64 -w 0 "$archive_file" > "${archive_file}.b64"
     fi
 }
 
-# Update GitHub variable
+# ---------------------------------------------------------------------------
+# Update a GitHub variable via the gh CLI
+# ---------------------------------------------------------------------------
 update_github_variable() {
     local archive_name="$1"
     local archive_file="$2"
-    local target="$3"  # repo, env, or codespaces
-    local target_name="$4"  # repo name or environment name
-    
+    local target="$3"
+    local target_name="$4"
+
     info "Encoding archive to base64..."
     encode_archive "$archive_file"
-    
+
     local encoded_file="${archive_file}.b64"
-    local encoded_value=$(cat "$encoded_file")
-    
+    local encoded_value
+    encoded_value=$(cat "$encoded_file")
+
     info "Updating GitHub variable $archive_name..."
-    
+
     case "$target" in
         repo)
             if [ -z "$target_name" ]; then
-                # Auto-detect repo
-                target_name=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || echo "")
+                target_name=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)
                 if [ -z "$target_name" ]; then
-                    error "Not in a git repository. Specify repo with --repo OWNER/REPO"
+                    die "Not in a git repository. Specify repo with --repo OWNER/REPO"
                 fi
             fi
             gh variable set "$archive_name" --body "$encoded_value" --repo "$target_name"
             ;;
         env)
             if [ -z "$target_name" ]; then
-                error "Environment name required with --env ENV_NAME"
+                die "Environment name required with --env ENV_NAME"
             fi
             gh variable set "$archive_name" --body "$encoded_value" --env "$target_name"
             ;;
         codespace)
-            # If Codespaces env update fails (permissions, repo restrictions, etc.),
-            # show the base64 payload so it can be saved manually.
+            # Codespace env updates can fail for various reasons – capture and explain
             if ! gh codespace env set "$archive_name" --value "$encoded_value"; then
-                warning "Unable to save Codespaces secret automatically. Save this value manually:"
+                warn "Unable to save Codespaces secret automatically. Save this value manually:"
                 echo "-----BEGIN HOMEARCHIVE ${archive_name}-----"
-                echo "$encoded_value"
+                printf '%s' "$encoded_value"
+                echo ""
                 echo "-----END HOMEARCHIVE ${archive_name}-----"
                 return 1
             fi
             ;;
         *)
-            error "Invalid target: $target (use: repo, env, or codespace)"
+            die "Invalid target: $target (use: repo, env, or codespace)"
             ;;
     esac
-    
-    success "GitHub variable $archive_name updated successfully"
-    
+
+    ok "GitHub variable $archive_name updated successfully"
+
     # Cleanup
     rm -f "$encoded_file"
 }
 
-# Command: update
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+# update  –  rebuild the archive containing a file and push to GitHub
 cmd_update() {
     local file="$1"
     local target="repo"
     local target_name=""
     local dry_run=false
-    
+
     shift
-    
-    # Parse options
+
     while [[ $# -gt 0 ]]; do
         case $1 in
             --repo)
-                target="repo"
-                target_name="$2"
-                shift 2
-                ;;
+                target="repo"; target_name="$2"; shift 2 ;;
             --env)
-                target="env"
-                target_name="$2"
-                shift 2
-                ;;
+                target="env";  target_name="$2"; shift 2 ;;
             --codespace)
-                target="codespace"
-                shift
-                ;;
+                target="codespace"; shift ;;
             --dry-run)
-                dry_run=true
-                shift
-                ;;
+                dry_run=true; shift ;;
             *)
-                error "Unknown option: $1"
-                ;;
+                die "Unknown option: $1" ;;
         esac
     done
-    
+
     if [ -z "$file" ]; then
-        error "File path required"
+        die "File path required"
     fi
-    
-    # Normalize file path
+
+    # Normalize the path
     file="${file#$HOME/}"
     file="${file#./}"
-    
+
     info "Looking up archive for file: $file"
-    
-    local archive_name=$(find_archive_for_file "$file")
+
+    local archive_name
+    archive_name=$(find_archive_for_file "$file") || true
     if [ -z "$archive_name" ]; then
-        error "File $file not found in any archive. Use 'add' command to add it first."
+        die "File $file not found in any archive. Use 'add' command to add it first."
     fi
-    
+
     info "Found in archive: $archive_name"
-    
-    # Create temporary archive
-    local temp_archive=$(mktemp /tmp/homearchive.XXXXXX.tar.gz)
+
+    # Create temporary archive in a temp directory (no suffix on mktemp)
+    local temp_dir
+    temp_dir=$(mktemp -d /tmp/homearchive.XXXXXX)
+    local temp_archive="${temp_dir}/${archive_name}.tar.gz"
     create_archive "$archive_name" "$temp_archive"
-    
+
     if [ "$dry_run" = true ]; then
-        info "Dry run mode - archive created but not uploaded"
+        info "Dry run mode – archive created but not uploaded"
         info "Archive size: $(du -h "$temp_archive" | cut -f1)"
         info "Would update GitHub variable: $archive_name (target: $target)"
-        rm -f "$temp_archive"
-        exit 0
+        rm -rf "$temp_dir"
+        return 0
     fi
-    
-    # Update GitHub
+
     update_github_variable "$archive_name" "$temp_archive" "$target" "$target_name"
-    
-    # Cleanup
-    rm -f "$temp_archive"
+    rm -rf "$temp_dir"
 }
 
-# Command: add
+# add  –  register a file in the manifest for a given archive
 cmd_add() {
     local file="$1"
     local archive_name="$2"
-    
+
     if [ -z "$file" ]; then
-        error "File path required"
+        die "File path required"
     fi
-    
-    # Normalize file path
+
     file="${file#$HOME/}"
     file="${file#./}"
-    
-    # Check if file exists
+
     if [ ! -e "$HOME/$file" ]; then
-        error "File does not exist: $HOME/$file"
+        die "File does not exist: $HOME/$file"
     fi
-    
-    # Check if file is already in an archive
-    local existing_archive=$(find_archive_for_file "$file" 2>/dev/null)
-    if [ -n "$existing_archive" ]; then
-        warning "File already in archive: $existing_archive"
-        read -p "Remove from $existing_archive and add to $archive_name? [y/N] " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            exit 1
+
+    # Interactive fallback when no archive name is given
+    if [ -z "$archive_name" ]; then
+        if ! is_interactive; then
+            die "Archive name required in non-interactive mode. Usage: ham add <file> <archive>"
         fi
-        # Remove from old archive
-        sed -i.bak "s|:$file||g" "$MANIFEST_FILE"
-        sed -i.bak "s|:$file:||g" "$MANIFEST_FILE"
+        info "Available archives:"
+        grep -v '^#' "$MANIFEST_FILE" 2>/dev/null | grep -v '^$' | cut -d: -f1 | sort -u | nl
+        echo "  Or enter a new archive name"
+        read -r -p "Archive name: " archive_name
+    fi
+
+    # Already in an archive?
+    local existing_archive
+    existing_archive=$(find_archive_for_file "$file" 2>/dev/null) || true
+    if [ -n "$existing_archive" ]; then
+        warn "File already in archive: $existing_archive"
+        if is_interactive; then
+            read -r -p "Remove from $existing_archive and add to $archive_name? [y/N] " reply
+            [[ "$reply" =~ ^[Yy]$ ]] || die "Aborted."
+        else
+            die "File already archived in $existing_archive. Use --force to move it, or remove it manually."
+        fi
+    fi
+
+    manifest_lock
+
+    # Remove from old archive (safe sed – escape path)
+    local escaped_file
+    escaped_file=$(escape_sed "$file")
+    if [ -n "${existing_archive:-}" ]; then
+        sed -i.bak "s|:${escaped_file}\b||g" "$MANIFEST_FILE"
+        # Clean up trailing/empty colons and empty lines
+        sed -i.bak -E 's|:+|:|g' "$MANIFEST_FILE"
+        sed -i.bak -E 's|^([A-Za-z_]+):$|#\1: (empty)|' "$MANIFEST_FILE"
         rm -f "${MANIFEST_FILE}.bak"
     fi
-    
-    if [ -z "$archive_name" ]; then
-        # Interactive mode
-        info "Available archives:"
-        grep -v '^#' "$MANIFEST_FILE" | grep -v '^$' | cut -d: -f1 | sort -u | nl
-        echo "  Or enter a new archive name"
-        read -p "Archive name: " archive_name
-    fi
-    
-    # Add to manifest
+
+    # Add to target archive
     if grep -q "^${archive_name}:" "$MANIFEST_FILE"; then
-        # Archive exists, append file
         sed -i.bak "s|^${archive_name}:.*|&:${file}|" "$MANIFEST_FILE"
         rm -f "${MANIFEST_FILE}.bak"
+        # Clean up any doubled colons the append might have created
+        sed -i.bak -E 's|:+|:|g' "$MANIFEST_FILE"
+        rm -f "${MANIFEST_FILE}.bak"
     else
-        # New archive
-        echo "${archive_name}:${file}" >> "$MANIFEST_FILE"
+        printf '%s:%s\n' "$archive_name" "$file" >> "$MANIFEST_FILE"
     fi
-    
-    success "Added $file to $archive_name"
+
+    manifest_unlock
+
+    ok "Added $file to $archive_name"
 }
 
-# Command: list
+# list  –  show archives or files within an archive
 cmd_list() {
     local archive_name="$1"
-    
+
     init_manifest
-    
+
     if [ -z "$archive_name" ]; then
-        # List all archives
         info "Available archives:"
-        grep -v '^#' "$MANIFEST_FILE" | grep -v '^$' | while IFS=':' read -r name rest; do
-            local file_count=$(echo "$rest" | tr ':' '\n' | grep -v '^$' | wc -l | tr -d ' ')
+        while IFS=':' read -r name rest; do
+            [[ "$name" =~ ^#.*$ ]] && continue
+            [[ -z "$name" ]] && continue
+            local file_count
+            file_count=$(printf '%s' "$rest" | tr ':' '\n' | grep -vc '^$')
             echo "  • $name ($file_count files)"
-        done
+        done < <(grep -v '^#' "$MANIFEST_FILE" | grep -v '^$')
     else
-        # List files in specific archive
         info "Files in $archive_name:"
-        get_archive_files "$archive_name" | while read -r file; do
+        local file
+        while IFS= read -r file; do
             [[ -z "$file" ]] && continue
             if [ -e "$HOME/$file" ]; then
                 echo "  ✓ $file"
             else
                 echo "  ✗ $file (missing)"
             fi
-        done
+        done < <(get_archive_files "$archive_name")
     fi
 }
 
-# Command: create
+# create  –  build an archive without uploading
 cmd_create() {
     local archive_name="$1"
     local output_file="$2"
-    
+    local no_encode=false
+
+    # Parse optional flag
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --no-encode)
+                no_encode=true; shift ;;
+            *)
+                archive_name="$1"
+                output_file="${2:-}"
+                shift 2 2>/dev/null || shift
+                ;;
+        esac
+    done
+
     if [ -z "$archive_name" ]; then
-        error "Archive name required"
+        die "Archive name required"
     fi
-    
+
     if [ -z "$output_file" ]; then
         output_file="${archive_name}.tar.gz"
     fi
-    
+
     create_archive "$archive_name" "$output_file"
-    encode_archive "$output_file"
-    
-    success "Archive and base64 file created:"
-    echo "  Archive: $output_file"
-    echo "  Base64:  ${output_file}.b64"
+
+    if [ "$no_encode" = false ]; then
+        encode_archive "$output_file"
+        ok "Archive and base64 file created:"
+        echo "  Archive: $output_file"
+        echo "  Base64:  ${output_file}.b64"
+    else
+        ok "Archive created (not encoded): $output_file"
+    fi
 }
 
-# Command: init
+# init  –  create skeleton manifest
 cmd_init() {
     init_manifest
     info "Edit the manifest file to define your archives:"
     echo "  $MANIFEST_FILE"
 }
 
-# Command: help
+# help
 cmd_help() {
     cat << 'EOF'
-ham (Home Archive Manager) - Manage HOMEARCHIVE environment variables
+ham (Home Archive Manager) – Manage HOMEARCHIVE environment variables
 
 USAGE:
     ham <command> [options]
@@ -403,11 +515,12 @@ COMMANDS:
         Initialize the manifest file
 
     add <file> [archive-name]
-        Add a file to an archive (interactive if archive-name not provided)
+        Add a file to an archive (interactive if archive-name not provided;
+        archive-name is required in non-interactive mode)
         Example: ham add ~/.ssh/config HOMEARCHIVE_SSH
 
     update <file> [options]
-        Update the archive containing <file> and push to GitHub
+        Update the archive containing <file> and push to GitHub.
         Options:
             --repo OWNER/REPO    Update repository variable (default)
             --env ENV_NAME       Update environment variable
@@ -419,8 +532,9 @@ COMMANDS:
         List all archives or files in a specific archive
         Example: ham list HOMEARCHIVE_SSH
 
-    create <archive-name> [output-file]
-        Create an archive file (for manual use)
+    create <archive-name> [output-file] [--no-encode]
+        Create an archive file (for manual use).
+        --no-encode  Skip base64 encoding (debugging)
         Example: ham create HOMEARCHIVE_SSH ssh-backup.tar.gz
 
     help
@@ -432,18 +546,20 @@ WORKFLOW:
     3. Update:     ham update ~/.ssh/config
 
 MANIFEST FILE:
-    Location: .homearchive-manifest
+    Location: ~/.homearchive-manifest
     Format:   ARCHIVE_NAME:file1:file2:file3
     Files are relative to $HOME
 
 EOF
 }
 
-# Main
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 main() {
     local command="${1:-help}"
     shift || true
-    
+
     case "$command" in
         init)
             cmd_init "$@"
@@ -453,6 +569,7 @@ main() {
             cmd_add "$@"
             ;;
         update)
+            require_cmd gh "Install from https://cli.github.com"
             init_manifest
             cmd_update "$@"
             ;;
@@ -467,7 +584,7 @@ main() {
             cmd_help
             ;;
         *)
-            error "Unknown command: $command (try 'help')"
+            die "Unknown command: $command (try 'help')"
             ;;
     esac
 }

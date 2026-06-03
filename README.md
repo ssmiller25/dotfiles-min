@@ -22,16 +22,18 @@ bash /path/to/dotfiles-min/install.sh
 **What it does:**
 - ✅ Injects `_homearchive_extract()` function into `~/.bashrc` and `~/.zshrc`
 - ✅ Preserves all existing shell configuration (no clobbering)
-- ✅ Creates backups of your original shell configs
+- ✅ Creates human-readable backups of your original shell configs (e.g. `~/.bashrc.backup.20260603_120000`)
 - ✅ Automatically extracts `HOMEARCHIVE*` variables on the next shell startup
 - ✅ Creates and manages `~/.homearchive-manifest` to track extracted files
+- ✅ Writes `~/.dotfiles-min-installed.txt` with installation metadata (no README overwrites)
+- ✅ Concurrent-safe manifest updates via directory-based locking
 
 **What happens if you have HOMEARCHIVE* variables:**
 - The script will extract them immediately during installation
 - Future shell startups will only extract if variables have changed
 
 **To uninstall:**
-Just restore from backup or manually remove the `dotfiles-min homearchive injection` block from your shell configs.
+Restore from backup (`~/.bashrc.backup.*`, `~/.zshrc.backup.*`) or manually delete the `dotfiles-min homearchive injection` block from your shell configs. Also remove `~/.dotfiles-min-installed.txt` and `~/.homearchive-manifest` if desired.
 
 ### GitHub Codespaces / Devcontainers
 
@@ -155,13 +157,13 @@ vim ~/.ssh/config
 
 - **`ham init`** - Create the manifest file
 - **`ham add <file> [archive]`** - Add a file to an archive
-- **`ham list [archive]`** - List all archives or files in a specific archive
+- **`ham list [archive]`** - List all archives or files in a specific archive. `ham update` requires the `gh` CLI and warns if archives exceed GitHub's 48KB secret limit.
 - **`ham update <file>`** - Update the archive containing the file and push to GitHub
   - `--repo OWNER/REPO` - Update repository variable (default, auto-detects current repo)
   - `--env ENV_NAME` - Update environment variable
   - `--codespace` - Update codespace variable
   - `--dry-run` - Preview changes without uploading
-- **`ham create <archive> [output]`** - Create archive file manually
+- **`ham create <archive> [output]`** - Create archive file manually. Use `--no-encode` to skip base64 (useful for debugging archive contents)
 
 ### How It Works
 
@@ -207,11 +209,11 @@ vim ~/.ssh/config
 
 ### Installing `ham` in Your PATH
 
-For easy access from anywhere:
+The installer copies `ham` into `~/bin/ham` and ensures `~/bin` is in your `PATH`. After installation, you can use `ham` from anywhere. If you installed manually:
 
 ```bash
 # Option 1: Symlink to a directory in your PATH
-ln -s /path/to/dotfiles-min/ham ~/.local/bin/ham
+mkdir -p ~/bin && ln -s /path/to/dotfiles-min/ham ~/bin/ham
 
 # Option 2: Add to your shell profile
 echo 'export PATH="/path/to/dotfiles-min:$PATH"' >> ~/.bashrc

@@ -6,7 +6,6 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HOMEARCHIVE_FUNC_NAME="_homearchive_extract"
 INJECTION_MARKER="# === dotfiles-min homearchive injection ==="
 
 # Colors for output
@@ -27,21 +26,20 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
-# Ensure HOME/bin is in PATH
+# Ensure HOME/bin is in PATH (tight pattern match, not just substring)
 ensure_bin_in_path() {
     local shell_config="$1"
     local shell_name="$2"
-    
+
     if [ ! -f "$shell_config" ]; then
         return 0
     fi
-    
-    # Check if PATH already includes $HOME/bin
-    if grep -q "export PATH.*\$HOME/bin" "$shell_config" 2>/dev/null; then
+
+    # Match an actual export line, not comments or unrelated strings
+    if grep -qE '^[[:space:]]*export[[:space:]]+PATH=.*\$HOME/bin' "$shell_config" 2>/dev/null; then
         return 0
     fi
-    
-    # Add PATH configuration at the end of the file
+
     cat >> "$shell_config" << 'PATHEOF'
 
 # Ensure $HOME/bin is in PATH
@@ -49,11 +47,20 @@ if [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
     export PATH="$HOME/bin:$PATH"
 fi
 PATHEOF
-    
+
     log_info "Ensured $HOME/bin is in PATH for $shell_name"
 }
 
-# Generate the homearchive extraction function
+# ---------------------------------------------------------------------------
+# generate_homearchive_function
+#
+# Produces the shell function that will be injected into ~/.bashrc / ~/.zshrc.
+# Key improvements:
+#   • Uses eval for cross-shell indirect expansion (bash & zsh)
+#   • printf '%s' instead of echo -n (robust with base64 binary data)
+#   • mkdir-based manifest locking to prevent concurrent-corruption
+#   • Safer temp-directory handling
+# ---------------------------------------------------------------------------
 generate_homearchive_function() {
     cat << 'FUNC_EOF'
 # Extract files from HOMEARCHIVE* environment variables
@@ -61,8 +68,29 @@ generate_homearchive_function() {
 _homearchive_extract() {
     local MANIFEST_FILE="${HOME}/.homearchive-manifest"
     local ORIGINAL_DIR="$PWD"
-    
-    # Initialize manifest if it doesn't exist
+
+    # ---- Manifest locking (mkdir is atomic, works on macOS & Linux) ----
+    _manifest_lock() {
+        local lock_dir="${MANIFEST_FILE}.lock"
+        local i=0
+        while ! mkdir "$lock_dir" 2>/dev/null; do
+            sleep 0.1
+            i=$((i + 1))
+            if [ "$i" -ge 50 ]; then
+                echo "Warning: Could not acquire manifest lock after 5s" >&2
+                return 1
+            fi
+        done
+        return 0
+    }
+
+    _manifest_unlock() {
+        rmdir "${MANIFEST_FILE}.lock" 2>/dev/null || true
+    }
+    # -----------------------------------------------------------------
+
+    # Initialise manifest if it doesn't exist
+    _manifest_lock || return 1
     if [ ! -f "$MANIFEST_FILE" ]; then
         cat > "$MANIFEST_FILE" << 'EOF'
 # HOMEARCHIVE Manifest
@@ -72,77 +100,84 @@ _homearchive_extract() {
 # Auto-populated by homearchive extraction
 EOF
     fi
-    
-    # Get list of HOMEARCHIVE* variables
+    _manifest_unlock
+
+    # Discover HOMEARCHIVE* variables (bash compgen first, env fallback)
     local homearchive_vars
-    if command -v compgen &>/dev/null; then
-        # Bash
+    if command -v compgen >/dev/null 2>&1; then
         homearchive_vars=$(compgen -e | grep "^HOMEARCHIVE" || true)
     else
-        # Fallback (zsh, sh, etc.)
         homearchive_vars=$(env | grep "^HOMEARCHIVE" | cut -d= -f1 || true)
     fi
-    
+
     # Process each HOMEARCHIVE* variable
     for var_name in $homearchive_vars; do
-        # Get the value using indirect expansion
+        # Cross-shell indirect expansion (bash, zsh, and POSIX fallback)
         local var_value
-        if [ -n "${!var_name:-}" ]; then
-            var_value="${!var_name}"
+        if [ -n "${ZSH_VERSION:-}" ]; then
+            var_value="${(P)var_name}"
+        elif [ -n "${BASH_VERSION:-}" ]; then
+            var_value="${!var_name:-}"
         else
+            eval "var_value=\${$var_name:-}"
+        fi
+
+        # Skip empty variables
+        if [ -z "${var_value:-}" ]; then
             continue
         fi
-        
-        # Only process if variable has content
-        if [ -n "$var_value" ]; then
-            echo "Extracting $var_name to $HOME..."
-            cd "$HOME" || continue
-            
-            # Extract to temporary location first to list files
-            local temp_extract
-            temp_extract=$(mktemp -d /tmp/homearchive.XXXXXX)
-            
-            if echo -n "$var_value" | base64 -d | tar -xzf - -C "$temp_extract" 2>/dev/null; then
-                # Get list of extracted files (relative to temp dir)
-                local extracted_files
-                extracted_files=$(cd "$temp_extract" && find . -type f | sed 's|^\./||' | sort)
-                
-                # Move files to home directory
-                cd "$temp_extract" && tar -cf - . | (cd "$HOME" && tar -xf -)
-                echo "Successfully extracted $var_name"
-                
-                # Update manifest
-                if [ -n "$extracted_files" ]; then
-                    # Check if this archive is already in manifest
-                    if grep -q "^${var_name}:" "$MANIFEST_FILE" 2>/dev/null; then
-                        # Archive exists, verify files match
-                        local manifest_files
-                        manifest_files=$(grep "^${var_name}:" "$MANIFEST_FILE" | cut -d: -f2- | tr ':' '\n' | sort)
-                        
-                        # Compare file lists
-                        if [ "$extracted_files" != "$manifest_files" ]; then
-                            echo "Updating manifest for $var_name (file list changed)"
-                            # Remove old entry
-                            grep -v "^${var_name}:" "$MANIFEST_FILE" > "${MANIFEST_FILE}.tmp" 2>/dev/null || true
-                            mv "${MANIFEST_FILE}.tmp" "$MANIFEST_FILE"
-                            # Add new entry
-                            echo "${var_name}:$(echo "$extracted_files" | tr '\n' ':' | sed 's/:$//')" >> "$MANIFEST_FILE"
-                        fi
-                    else
-                        # New archive, add to manifest
-                        echo "Adding $var_name to manifest"
-                        echo "${var_name}:$(echo "$extracted_files" | tr '\n' ':' | sed 's/:$//')" >> "$MANIFEST_FILE"
+
+        echo "Extracting $var_name to $HOME..."
+        cd "$HOME" || continue
+
+        # Extract into a temporary directory first so we can list files
+        local temp_extract
+        temp_extract=$(mktemp -d /tmp/homearchive.XXXXXX)
+
+        # Use printf instead of echo for binary-safe output
+        if printf '%s' "$var_value" | base64 -d 2>/dev/null | tar -xzf - -C "$temp_extract" 2>/dev/null; then
+            # List extracted files (relative paths)
+            local extracted_files
+            extracted_files=$(cd "$temp_extract" && find . -type f | sed 's|^\./||' | sort)
+
+            # Move files to $HOME
+            (cd "$temp_extract" && tar -cf - .) | (cd "$HOME" && tar -xf -)
+            echo "Successfully extracted $var_name"
+
+            # Update manifest (locked)
+            if [ -n "$extracted_files" ]; then
+                _manifest_lock || continue
+
+                local file_list
+                file_list=$(printf '%s' "$extracted_files" | tr '\n' ':' | sed 's/:$//')
+
+                if grep -q "^${var_name}:" "$MANIFEST_FILE" 2>/dev/null; then
+                    # Archive already known – update if the file list changed
+                    local manifest_files
+                    manifest_files=$(grep "^${var_name}:" "$MANIFEST_FILE" | cut -d: -f2- | tr ':' '\n' | sort)
+
+                    if [ "$extracted_files" != "$manifest_files" ]; then
+                        echo "Updating manifest for $var_name (file list changed)"
+                        grep -v "^${var_name}:" "$MANIFEST_FILE" > "${MANIFEST_FILE}.tmp" 2>/dev/null || true
+                        printf '%s:%s\n' "$var_name" "$file_list" >> "${MANIFEST_FILE}.tmp"
+                        mv "${MANIFEST_FILE}.tmp" "$MANIFEST_FILE"
                     fi
+                else
+                    # Brand-new archive
+                    echo "Adding $var_name to manifest"
+                    printf '%s:%s\n' "$var_name" "$file_list" >> "$MANIFEST_FILE"
                 fi
-            else
-                echo "Warning: Failed to extract $var_name" >&2
+
+                _manifest_unlock
             fi
-            
-            # Cleanup temp directory
-            rm -rf "$temp_extract"
+        else
+            echo "Warning: Failed to extract $var_name" >&2
         fi
+
+        # Clean up temp directory
+        rm -rf "$temp_extract"
     done
-    
+
     cd "$ORIGINAL_DIR" || true
 }
 
@@ -158,52 +193,52 @@ FUNC_EOF
 inject_into_shell_config() {
     local shell_config="$1"
     local shell_name="$2"
-    
+
     if [ ! -f "$shell_config" ]; then
-        log_warn "$shell_name config not found at $shell_config - skipping"
+        log_warn "$shell_name config not found at $shell_config – skipping"
         return 0
     fi
-    
-    # Check if already injected
-    if grep -q "$INJECTION_MARKER" "$shell_config" 2>/dev/null; then
-        log_info "$shell_name already has injection - skipping"
+
+    # Skip if already injected
+    if grep -qF "$INJECTION_MARKER" "$shell_config" 2>/dev/null; then
+        log_info "$shell_name already has injection – skipping"
         return 0
     fi
-    
-    # Back up the original file
-    cp "$shell_config" "${shell_config}.backup.$(date +%s)"
-    log_info "Backed up $shell_name to ${shell_config}.backup.*"
-    
-    # Create injection block
+
+    # Human-readable backup timestamp
+    local backup_file="${shell_config}.backup.$(date +%Y%m%d_%H%M%S)"
+    cp "$shell_config" "$backup_file"
+    log_info "Backed up $shell_name to $backup_file"
+
+    # Write injection block
     cat >> "$shell_config" << 'INJECT_EOF'
 
 # === dotfiles-min homearchive injection ===
-# Auto-generated by install.sh - do not edit this block manually
+# Auto-generated by install.sh – do not edit this block manually
 INJECT_EOF
-    
+
     generate_homearchive_function >> "$shell_config"
-    
+
     log_info "Injected HOMEARCHIVE extraction into $shell_name"
 }
 
-# Main installation routine
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
 main() {
-    log_info "dotfiles-min installer starting..."
+    log_info "dotfiles-min installer starting…"
     log_info "Script location: $SCRIPT_DIR"
-    
-    # Check if running in home directory context
+
     if [ "$HOME" = "/" ]; then
         log_error "Cannot install with HOME=/. Invalid environment."
         return 1
     fi
-    
+
     log_info "Home directory: $HOME"
-    
-    # Track what was installed
+
     local ham_installed=false
-    local readme_installed=false
-    
-    # Copy ham utility to ~/bin
+
+    # ---- Copy ham utility to ~/bin ----
     if [ -f "$SCRIPT_DIR/ham" ]; then
         mkdir -p "$HOME/bin"
         if cp "$SCRIPT_DIR/ham" "$HOME/bin/ham" && chmod +x "$HOME/bin/ham"; then
@@ -213,98 +248,80 @@ main() {
             log_error "Failed to copy ham utility to ~/bin/ham"
         fi
     else
-        log_warn "ham utility not found at $SCRIPT_DIR/ham - skipping"
+        log_warn "ham utility not found at $SCRIPT_DIR/ham – skipping"
     fi
-    
-    # Copy README.md to home directory
-    if [ -f "$SCRIPT_DIR/README.md" ]; then
-        if [ -f "$HOME/README.md" ]; then
-            local readme_backup="$HOME/README.md.backup.$(date +%Y%m%d_%H%M%S)"
-            if cp "$HOME/README.md" "$readme_backup"; then
-                log_warn "README.md already exists in home directory - will be overwritten"
-                log_info "Backed up existing README.md to $readme_backup"
-            else
-                log_error "Failed to backup existing README.md - skipping installation"
-                return 1
-            fi
-        fi
-        if cp "$SCRIPT_DIR/README.md" "$HOME/README.md"; then
-            log_info "Copied README.md to $HOME/README.md"
-            readme_installed=true
-        else
-            log_error "Failed to copy README.md to $HOME/README.md"
-        fi
-    else
-        log_warn "README.md not found at $SCRIPT_DIR/README.md - skipping"
-    fi
-    
-    # Inject into bash
+
+    # ---- Inject into shell configs ----
     inject_into_shell_config "$HOME/.bashrc" "Bash"
-    
-    # Inject into zsh
-    inject_into_shell_config "$HOME/.zshrc" "Zsh"
-    
-    # Ensure ~/bin is in PATH for both shells
+    inject_into_shell_config "$HOME/.zshrc"  "Zsh"
+
+    # ---- Ensure ~/bin is in PATH ----
     ensure_bin_in_path "$HOME/.bashrc" "Bash"
-    ensure_bin_in_path "$HOME/.zshrc" "Zsh"
-    
-    # Optional: run extraction immediately if HOMEARCHIVE* vars are present
+    ensure_bin_in_path "$HOME/.zshrc"  "Zsh"
+
+    # ---- Write installation info (instead of overwriting README) ----
+    local info_file="$HOME/.dotfiles-min-installed.txt"
+    cat > "$info_file" << INFOEOF
+dotfiles-min was installed on $(date '+%Y-%m-%d %H:%M:%S')
+Installation source : $SCRIPT_DIR
+Shell configs        : ~/.bashrc, ~/.zshrc
+Utility              : ~/bin/ham
+Manifest             : ~/.homearchive-manifest
+
+Run 'ham --help' to learn how to manage your archives.
+INFOEOF
+    log_info "Created installation info: $info_file"
+
+    # ---- Optional: run extraction immediately if HOMEARCHIVE* vars are set ----
     if env | grep -q "^HOMEARCHIVE"; then
-        log_info "HOMEARCHIVE* variables detected - running extraction..."
-        
-        # Source the function from the appropriate shell config
-        if [ -n "$ZSH_VERSION" ]; then
-            # Running in zsh
-            source "$HOME/.zshrc"
-        else
-            # Running in bash
+        log_info "HOMEARCHIVE* variables detected – running extraction…"
+
+        # Choose the right config file based on the running shell
+        if [ -n "${BASH_VERSION:-}" ]; then
+            # shellcheck disable=SC1090
             source "$HOME/.bashrc"
+        elif [ -n "${ZSH_VERSION:-}" ]; then
+            # shellcheck disable=SC1090
+            source "$HOME/.zshrc"
         fi
-        
-        # Call the extraction function if it exists
+
         if declare -f _homearchive_extract >/dev/null 2>&1; then
             _homearchive_extract
         fi
     else
-        log_info "No HOMEARCHIVE* variables detected - extraction will run on next shell startup"
+        log_info "No HOMEARCHIVE* variables detected – extraction will run on next shell startup"
     fi
-    
+
+    # ---- Summary ----
     log_info "Installation complete!"
     log_info ""
     log_info "What was installed:"
     log_info "  • Added _homearchive_extract() function to ~/.bashrc"
     log_info "  • Added _homearchive_extract() function to ~/.zshrc"
-    log_info "  • Created ~/.homearchive-manifest (will be auto-populated)"
+    log_info "  • Created ~/.homearchive-manifest (auto-populated on first extraction)"
     log_info "  • Added \$HOME/bin to PATH in ~/.bashrc and ~/.zshrc"
     if [ "$ham_installed" = true ]; then
         log_info "  • Copied ham utility to ~/bin/ham"
     fi
-    if [ "$readme_installed" = true ]; then
-        log_info "  • Copied README.md to ~/README.md"
-    fi
+    log_info "  • Installation info written to $info_file"
     log_info ""
     if [ "$ham_installed" = true ]; then
-        log_info "The ham utility has been installed to ~/bin/ham"
-        log_info "It will be available in your PATH after restarting your shell."
+        log_info "ham is available after restarting your shell (or run: export PATH=\"\$HOME/bin:\$PATH\")"
     fi
     log_info ""
     log_info "To remove:"
-    log_info "  • Restore from backup: cp ~/.bashrc.backup.* ~/.bashrc"
+    log_info "  • Restore shell configs from their .backup.* copies"
     log_info "  • Or manually delete the 'dotfiles-min homearchive injection' block"
-    log_info "  • Also remove the PATH configuration block if desired"
     if [ "$ham_installed" = true ]; then
-        log_info "  • Remove ham utility: rm -f ~/bin/ham"
+        log_info "  • rm -f ~/bin/ham"
     fi
-    if [ "$readme_installed" = true ]; then
-        log_info "  • For README.md, restore from backup (if one was created) or remove: rm -f ~/README.md"
-        log_info "    Check for backups with: ls -la ~/README.md.backup.*"
-    fi
+    log_info "  • rm -f $info_file"
     log_info ""
-    log_info "Your original shell configs were backed up:"
-    ls -la "$HOME"/.bashrc.backup.* "$HOME"/.zshrc.backup.* 2>/dev/null || log_info "  (no backups found yet)"
+    log_info "Backups:"
+    ls -la "$HOME"/.bashrc.backup.* "$HOME"/.zshrc.backup.* 2>/dev/null || log_info "  (no backups created yet)"
 }
 
-# Run main if not sourced
+# Run main if executed (not sourced)
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main "$@"
 fi
